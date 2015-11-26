@@ -246,11 +246,15 @@ public class RecentsActivity extends Activity implements RecentsView.RecentsView
             }
         }
 
+        boolean enableShakeCleanByUser = Settings.System.getInt(getContentResolver(),
+            Settings.System.SHAKE_TO_CLEAN_RECENTS, 0) == 1;
+
         // Update the top level view's visibilities
         if (mConfig.launchedWithNoRecentTasks) {
             if (mEmptyView == null) {
                 mEmptyView = mEmptyViewStub.inflate();
             }
+            mRecentsView.enableShake(false);
             mEmptyView.setVisibility(View.VISIBLE);
             mEmptyView.setOnClickListener(new View.OnClickListener() {
                 @Override
@@ -259,15 +263,16 @@ public class RecentsActivity extends Activity implements RecentsView.RecentsView
                 }
             });
             mRecentsView.setSearchBarVisibility(View.GONE);
-            findViewById(R.id.clear_recents).setVisibility(View.GONE);
+            findViewById(R.id.floating_action_button).setVisibility(View.GONE);
         } else {
             if (mEmptyView != null) {
                 mEmptyView.setVisibility(View.GONE);
                 mEmptyView.setOnClickListener(null);
             }
-            findViewById(R.id.clear_recents).setVisibility(View.VISIBLE);
+            mRecentsView.enableShake(true && enableShakeCleanByUser);
+            findViewById(R.id.floating_action_button).setVisibility(View.VISIBLE);
             boolean showSearchBar = Settings.System.getInt(getContentResolver(),
-                       Settings.System.RECENTS_SHOW_SEARCH_BAR, 1) == 1;
+                       Settings.System.RECENTS_SHOW_SEARCH_BAR, 0) == 1;
             if (mRecentsView.hasSearchBar()) {
                 if (showSearchBar) {
                     mRecentsView.setSearchBarVisibility(View.VISIBLE);
@@ -314,6 +319,8 @@ public class RecentsActivity extends Activity implements RecentsView.RecentsView
                     // Save the app widget id into the settings
                     mConfig.updateSearchBarAppWidgetId(this, widgetInfo.first);
                     mSearchAppWidgetInfo = widgetInfo.second;
+                } else {
+                    mConfig.updateSearchBarAppWidgetId(this, -1);
                 }
             }
         }

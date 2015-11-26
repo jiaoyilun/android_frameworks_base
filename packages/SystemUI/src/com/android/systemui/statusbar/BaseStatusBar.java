@@ -244,6 +244,9 @@ public abstract class BaseStatusBar extends SystemUI implements
     private RecentsComponent mRecents;
 
     protected int mZenMode;
+    
+    private ArrayList<String> mDndList;
+    private ArrayList<String> mBlacklist;
 
     // which notification is currently being longpress-examined by the user
     private NotificationGuts mNotificationGutsExposed;
@@ -294,6 +297,38 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
     };
 
+    private class SettingsObserver extends ContentObserver {
+        public SettingsObserver(Handler handler) {
+            super(handler);
+        }
+
+        public void observe() {
+            ContentResolver resolver = mContext.getContentResolver();
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.HEADS_UP_CUSTOM_VALUES),
+                    false, this);
+            resolver.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.HEADS_UP_BLACKLIST_VALUES),
+                    false, this);
+            update();
+        }
+
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            update();
+        }
+
+        private void update() {
+            ContentResolver resolver = mContext.getContentResolver();
+            final String dndString = Settings.System.getString(mContext.getContentResolver(),
+                    Settings.System.HEADS_UP_CUSTOM_VALUES);
+            final String blackString = Settings.System.getString(mContext.getContentResolver(),
+                    Settings.System.HEADS_UP_BLACKLIST_VALUES);
+            splitAndAddToArrayList(mDndList, dndString, "\\|");
+            splitAndAddToArrayList(mBlacklist, blackString, "\\|");
+        }
+    };
+    
     public RemoteViews.OnClickHandler getOnClickHandler() {
         return mOnClickHandler;
     }
@@ -541,6 +576,11 @@ public abstract class BaseStatusBar extends SystemUI implements
                 ServiceManager.checkService(DreamService.DREAM_SERVICE));
         mPowerManager = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
 
+        mDndList = new ArrayList<String>();
+        mBlacklist = new ArrayList<String>();
+        
+        SettingsObserver observer = new SettingsObserver(mHandler);
+        observer.observe();
         mSettingsObserver.onChange(false); // set up
         mContext.getContentResolver().registerContentObserver(
                 Settings.Global.getUriFor(Settings.Global.DEVICE_PROVISIONED), true,
@@ -1842,6 +1882,10 @@ public abstract class BaseStatusBar extends SystemUI implements
             mKeyguardIconOverflowContainer.setVisibility(View.GONE);
         }
 
+        if (onKeyguard) {
+            hideWeatherPanelIfNecessary(visibleNotifications, getMaxKeyguardNotifications());
+        }
+        
         mStackScroller.changeViewPosition(mKeyguardIconOverflowContainer,
                 mStackScroller.getChildCount() - 3);
         mStackScroller.changeViewPosition(mEmptyShadeView, mStackScroller.getChildCount() - 2);
@@ -1870,6 +1914,19 @@ public abstract class BaseStatusBar extends SystemUI implements
         return isKeyguardAllowedForApp;
     }
 
+    private void hideWeatherPanelIfNecessary(int visibleNotifications, int maxKeyguardNotifications) {
+        final ContentResolver resolver = mContext.getContentResolver();
+
+        int notifications = visibleNotifications;
+        if (mKeyguardIconOverflowContainer.getIconsView().getChildCount() > 0) {
+            notifications += 1;
+        }
+        Settings.System.putInt(resolver,
+                Settings.System.LOCK_SCREEN_VISIBLE_NOTIFICATIONS, notifications);
+        Settings.System.putInt(resolver,
+                Settings.System.LOCK_SCREEN_MAX_NOTIFICATIONS, maxKeyguardNotifications);
+    }
+    
     protected void setZenMode(int mode) {
         if (!isDeviceProvisioned()) return;
         mZenMode = mode;
@@ -2160,7 +2217,7 @@ public abstract class BaseStatusBar extends SystemUI implements
     }
 
     protected boolean shouldInterrupt(StatusBarNotification sbn) {
-        if (mNotificationData.shouldFilterOut(sbn)) {
+    	if (mNotificationData.shouldFilterOut(sbn)) {
             if (DEBUG) {
                 Log.d(TAG, "Skipping HUN check for " + sbn.getKey() + " since it's filtered out.");
             }
@@ -2172,6 +2229,11 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
 
         Notification notification = sbn.getNotification();
+
+        if (isPackageBlacklisted(sbn.getPackageName())) {
+            return false;
+        }
+
         // some predicates to make the boolean logic legible
         boolean isNoisy = (notification.defaults & Notification.DEFAULT_SOUND) != 0
                 || (notification.defaults & Notification.DEFAULT_VIBRATE) != 0
@@ -2180,27 +2242,73 @@ public abstract class BaseStatusBar extends SystemUI implements
         boolean isHighPriority = sbn.getScore() >= INTERRUPTION_THRESHOLD;
         boolean isFullscreen = notification.fullScreenIntent != null;
         boolean hasTicker = mHeadsUpTicker && !TextUtils.isEmpty(notification.tickerText);
-        boolean isAllowed = notification.extras.getInt(Notification.EXTRA_AS_HEADS_UP,
-                Notification.HEADS_UP_ALLOWED) != Notification.HEADS_UP_NEVER;
+        int asHeadsUp = notification.extras.getInt(Notification.EXTRA_AS_HEADS_UP,
+                Notification.HEADS_UP_ALLOWED);
+        boolean isAllowed = asHeadsUp != Notification.HEADS_UP_NEVER;
+        boolean isOngoing = sbn.isOngoing();
         boolean accessibilityForcesLaunch = isFullscreen
                 && mAccessibilityManager.isTouchExplorationEnabled();
 
-        boolean interrupt = (isFullscreen || (isHighPriority && (isNoisy || hasTicker)))
+
+        boolean isExpanded = false;
+        if (mStackScroller != null) {
+            isExpanded = mStackScroller.getIsExpanded();
+        }
+
+        boolean interrupt = (isFullscreen || (isHighPriority && (isNoisy || hasTicker))
+                || asHeadsUp == Notification.HEADS_UP_REQUESTED)
                 && isAllowed
                 && !accessibilityForcesLaunch
                 && mPowerManager.isScreenOn()
-                && (!mStatusBarKeyguardViewManager.isShowing()
-                        || mStatusBarKeyguardViewManager.isOccluded())
-                && !mStatusBarKeyguardViewManager.isInputRestricted();
+                && !isExpanded;
         try {
             interrupt = interrupt && !mDreamManager.isDreaming();
         } catch (RemoteException e) {
             Log.d(TAG, "failed to query dream manager", e);
         }
+
+        // its below our threshold priority, we might want to always display
+        // notifications from certain apps
+        if (!isHighPriority && !isOngoing && !isExpanded) {
+            // However, we don't want to interrupt if we're in an application that is
+            // in Do Not Disturb
+            if (!isPackageInDnd(getTopLevelPackage())) {
+                return true;
+            }
+        }
         if (DEBUG) Log.d(TAG, "interrupt: " + interrupt);
         return interrupt;
     }
 
+    private String getTopLevelPackage() {
+        final ActivityManager am = (ActivityManager)
+                mContext.getSystemService(Context.ACTIVITY_SERVICE);
+        List<ActivityManager.RunningTaskInfo > taskInfo = am.getRunningTasks(1);
+        ComponentName componentInfo = taskInfo.get(0).topActivity;
+        return componentInfo.getPackageName();
+    }
+
+    private boolean isPackageInDnd(String packageName) {
+        return mDndList.contains(packageName);
+    }
+
+    private boolean isPackageBlacklisted(String packageName) {
+        return mBlacklist.contains(packageName);
+    }
+
+	private void splitAndAddToArrayList(ArrayList<String> arrayList, String baseString, String separator) {
+		// clear first
+		if (arrayList != null) {
+			arrayList.clear();
+			if (baseString != null) {
+				final String[] array = TextUtils.split(baseString, separator);
+				for (String item : array) {
+					arrayList.add(item.trim());
+				}
+			}
+		}
+	}
+    
     public void setInteracting(int barWindow, boolean interacting) {
         // hook for subclasses
     }

@@ -84,6 +84,7 @@ public class PhoneStatusBarPolicy {
     private static final String SLOT_CDMA_ERI = "cdma_eri";
     private static final String SLOT_ALARM_CLOCK = "alarm_clock";
     private static final String SLOT_SU = "su";
+    private static final String SLOT_HEADSET = "headset";
 
     private static final String SDCARD_ABSENT = "sdcard_absent";
     private static final String SDCARD_KEYWORD = "SD";
@@ -94,6 +95,9 @@ public class PhoneStatusBarPolicy {
     private final CastController mCast;
     private final SuController mSuController;
     private boolean mAlarmIconVisible;
+    private boolean mSuIndicatorVisible;
+    private boolean mBluetoothIconVisible;
+    
     private final HotspotController mHotspot;
 
     // Assume it's all good unless we hear otherwise.  We don't always seem
@@ -106,6 +110,7 @@ public class PhoneStatusBarPolicy {
     private int mZen;
 
     private boolean mBluetoothEnabled = false;
+    private boolean mBluetoothConnected = false;
     StorageManager mStorageManager;
 
     private BroadcastReceiver mIntentReceiver = new BroadcastReceiver() {
@@ -133,6 +138,9 @@ public class PhoneStatusBarPolicy {
             }
             else if (action.equals(Intent.ACTION_USER_SWITCHED)) {
                 updateAlarm();
+            }
+            else if (action.equals(Intent.ACTION_HEADSET_PLUG)) {
+                updateHeadset(intent);
             }
         }
     };
@@ -162,6 +170,7 @@ public class PhoneStatusBarPolicy {
         filter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
         filter.addAction(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED);
         filter.addAction(Intent.ACTION_USER_SWITCHED);
+        filter.addAction(Intent.ACTION_HEADSET_PLUG);
         mContext.registerReceiver(mIntentReceiver, filter, null, mHandler);
 
         int numPhones = TelephonyManager.getDefault().getPhoneCount();
@@ -199,6 +208,10 @@ public class PhoneStatusBarPolicy {
         mService.setIconVisibility(SLOT_VOLUME, false);
         updateVolumeZen();
 
+        // headset
+        mService.setIcon(SLOT_HEADSET, R.drawable.stat_sys_headset, 0, null);
+        mService.setIconVisibility(SLOT_HEADSET, false);
+        
         if (mContext.getResources().getBoolean(R.bool.config_showSdcardAbsentIndicator)) {
             mStorageManager = (StorageManager) context
                     .getSystemService(Context.STORAGE_SERVICE);
@@ -220,12 +233,20 @@ public class PhoneStatusBarPolicy {
         mService.setIcon(SLOT_SU, R.drawable.stat_sys_su, 0, null);
         mService.setIconVisibility(SLOT_SU, false);
         mSuController.addCallback(mSuCallback);
-
-        mAlarmIconObserver.onChange(true);
+        
+        mSettingsObserver.onChange(true);
         mContext.getContentResolver().registerContentObserver(
                 Settings.System.getUriFor(Settings.System.SHOW_ALARM_ICON),
-                false, mAlarmIconObserver);
-
+                false, mSettingsObserver);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SHOW_SU_INDICATOR),
+                false, mSettingsObserver);
+        
+        mBluetoothIconObserver.onChange(true);
+        mContext.getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(Settings.System.SHOW_BLUETOOTH_ICON),
+                false, mBluetoothIconObserver);
+        
         // hotspot
         mService.setIcon(SLOT_HOTSPOT, R.drawable.stat_sys_hotspot, 0, null);
         mService.setIconVisibility(SLOT_HOTSPOT, mHotspot.isHotspotEnabled());
@@ -234,12 +255,15 @@ public class PhoneStatusBarPolicy {
         QSUtils.registerObserverForQSChanges(mContext, mQSListener);
     }
 
-    private ContentObserver mAlarmIconObserver = new ContentObserver(null) {
+    private ContentObserver mSettingsObserver = new ContentObserver(null) {
         @Override
         public void onChange(boolean selfChange, Uri uri) {
             mAlarmIconVisible = Settings.System.getInt(mContext.getContentResolver(),
                     Settings.System.SHOW_ALARM_ICON, 1) == 1;
             updateAlarm();
+            mSuIndicatorVisible = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.SHOW_SU_INDICATOR, 1) == 1;
+            updateSu();
         }
 
         @Override
@@ -248,6 +272,13 @@ public class PhoneStatusBarPolicy {
         }
     };
 
+    private final void updateHeadset(Intent intent) {
+        int state = intent.getIntExtra("state", 0);
+        boolean mHeadsetIcon = Settings.System.getInt(mContext.getContentResolver(),
+                Settings.System.SHOW_HEADSET_ICON, 1) == 1;
+        mService.setIconVisibility(SLOT_HEADSET, (state == 1 && mHeadsetIcon)  ? true : false);
+    }
+    
     private final void updateSDCardtoAbsent() {
         mService.setIcon(SDCARD_ABSENT, R.drawable.stat_sys_no_sdcard, 0, null);
         mService.setIconVisibility(SDCARD_ABSENT, !isSdCardInsert(mContext));
@@ -269,6 +300,20 @@ public class PhoneStatusBarPolicy {
         return null;
     }
 
+    private ContentObserver mBluetoothIconObserver = new ContentObserver(null) {
+        @Override
+        public void onChange(boolean selfChange, Uri uri) {
+            mBluetoothIconVisible = Settings.System.getInt(mContext.getContentResolver(),
+                    Settings.System.SHOW_BLUETOOTH_ICON, 1) == 1;
+            updateBluetooth();
+        }
+
+        @Override
+        public void onChange(boolean selfChange) {
+            onChange(selfChange, null);
+        }
+    };  
+    
     public void setZenMode(int zen) {
         mZen = zen;
         updateVolumeZen();
@@ -370,6 +415,26 @@ public class PhoneStatusBarPolicy {
         }
     }
 
+//    private final void updateBluetooth() {
+//        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+//        int iconId = R.drawable.stat_sys_data_bluetooth;
+//        String contentDescription =
+//                mContext.getString(R.string.accessibility_bluetooth_disconnected);
+//        if (adapter != null) {
+//            mBluetoothEnabled = (adapter.getState() == BluetoothAdapter.STATE_ON);
+//            if (adapter.getConnectionState() == BluetoothAdapter.STATE_CONNECTED) {
+//                iconId = R.drawable.stat_sys_data_bluetooth_connected;
+//                contentDescription = mContext.getString(R.string.accessibility_bluetooth_connected);
+//            }
+//        } else {
+//            mBluetoothEnabled = false;
+//        }
+//
+//        mService.setIcon(SLOT_BLUETOOTH, iconId, 0, contentDescription);
+//        mService.setIconVisibility(SLOT_BLUETOOTH, mBluetoothEnabled);
+//    }
+    
+    
     private final void updateBluetooth() {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         int iconId = R.drawable.stat_sys_data_bluetooth;
@@ -377,7 +442,8 @@ public class PhoneStatusBarPolicy {
                 mContext.getString(R.string.accessibility_bluetooth_disconnected);
         if (adapter != null) {
             mBluetoothEnabled = (adapter.getState() == BluetoothAdapter.STATE_ON);
-            if (adapter.getConnectionState() == BluetoothAdapter.STATE_CONNECTED) {
+            mBluetoothConnected = (adapter.getConnectionState() == BluetoothAdapter.STATE_CONNECTED);
+            if (mBluetoothConnected) {
                 iconId = R.drawable.stat_sys_data_bluetooth_connected;
                 contentDescription = mContext.getString(R.string.accessibility_bluetooth_connected);
             }
@@ -386,8 +452,13 @@ public class PhoneStatusBarPolicy {
         }
 
         mService.setIcon(SLOT_BLUETOOTH, iconId, 0, contentDescription);
-        mService.setIconVisibility(SLOT_BLUETOOTH, mBluetoothEnabled);
+        if (mBluetoothConnected) {
+            mService.setIconVisibility(SLOT_BLUETOOTH, true);
+        } else {
+            mService.setIconVisibility(SLOT_BLUETOOTH, mBluetoothEnabled && mBluetoothIconVisible);    
+        }
     }
+    
 
     private final void updateTTY(Intent intent) {
         int currentTtyMode = intent.getIntExtra(TelecomManager.EXTRA_CURRENT_TTY_MODE,
@@ -440,8 +511,9 @@ public class PhoneStatusBarPolicy {
         }
     };
 
+    
     private void updateSu() {
-        mService.setIconVisibility(SLOT_SU, mSuController.hasActiveSessions());
+        mService.setIconVisibility(SLOT_SU, mSuController.hasActiveSessions() && mSuIndicatorVisible);
         if (mSuController.hasActiveSessions()) {
             publishSuCustomTile();
         } else {

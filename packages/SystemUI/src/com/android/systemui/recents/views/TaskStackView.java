@@ -20,16 +20,23 @@ import android.animation.ValueAnimator;
 import android.app.ActivityManager;
 import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
+import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.IPackageDataObserver;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.Message;
 import android.os.UserHandle;
+import android.os.Vibrator;
 import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.MotionEvent;
@@ -65,6 +72,7 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
         public void onTaskViewClicked(TaskStackView stackView, TaskView tv, TaskStack stack, Task t,
                                       boolean lockToTask);
         public void onTaskViewAppInfoClicked(Task t);
+        public void onTaskFloatClicked(Task t);
         public void onTaskViewDismissed(Task t);
         public void onAllTaskViewsDismissed();
         public void onTaskStackFilterTriggered();
@@ -89,6 +97,7 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
 
     private PopupMenu mPopup;
 
+    static final String TAG = "TaskStackView";
     // Optimizations
     int mStackViewsAnimationDuration;
     boolean mStackViewsDirty = true;
@@ -105,6 +114,8 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
     HashMap<Task, TaskView> mTmpTaskViewMap = new HashMap<Task, TaskView>();
     LayoutInflater mInflater;
 
+    private ArrayList<String> whiteList;
+    
     // A convenience update listener to request updating clipping of tasks
     ValueAnimator.AnimatorUpdateListener mRequestUpdateClippingListener =
             new ValueAnimator.AnimatorUpdateListener() {
@@ -137,6 +148,8 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
                 }
             }
         });
+        whiteList = new ArrayList<String>();
+        
     }
 
     /** Sets the callbacks */
@@ -554,17 +567,34 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
         mFocusedTaskIndex = -1;
     }
 
+    private boolean dismissAll() {
+        return Settings.System.getInt(mContext.getContentResolver(),
+            Settings.System.RECENTS_CLEAR_ALL_DISMISS_ALL, 1) == 1;
+    }
+
     public void dismissAllTasks() {
+    	
+    	refreshWhiteList();
+    	
         final ArrayList<Task> tasks = new ArrayList<Task>();
         tasks.addAll(mStack.getTasks());
 
+        String packageName = null;
         // Remove visible TaskViews
         long dismissDelay = 0;
         int childCount = getChildCount();
         if (childCount > 0) {
             int delay = mConfig.taskViewRemoveAnimDuration / childCount;
             for (int i = 0; i < childCount; i++) {
+            	if(dismissAll()&&i==(childCount-1)) continue;
                 TaskView tv = (TaskView) getChildAt(i);
+                Log.d(TAG, "key:"+tv.mTask.key.toString());
+                packageName = tv.mTask.key.baseIntent.getComponent().getPackageName();
+                if(isPackageExcluded(packageName)){
+                	Log.d(TAG,"View SKIPED");
+                	continue;
+                }
+                
                 tasks.remove(tv.getTask());
                 tv.dismissTask(dismissDelay);
                 dismissDelay += delay;
@@ -573,11 +603,19 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
 
         // Remove any other Tasks
         for (Task t : tasks) {
+        	Log.d(TAG, "task:"+t.toString());
+        	packageName = t.key.baseIntent.getComponent().getPackageName();
+        	 if(isPackageExcluded(packageName)){
+             	Log.d(TAG,"Task SKIPED");
+             	continue;
+             }
+        	
             if (mStack.getTasks().contains(t)) {
+            	if(dismissAll()&&tasks.indexOf(t)==(tasks.size()-1)) continue;
                 mStack.removeTask(t);
             }
         }
-
+        
         // removeAllUserTask() can take upwards of two seconds to execute so post
         // a delayed runnable to run this code once we are done animating
         postDelayed(new Runnable() {
@@ -585,7 +623,6 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
             public void run() {
                 // And remove all the excluded or all the other tasks
                 SystemServicesProxy ssp = RecentsTaskLoader.getInstance().getSystemServicesProxy();
-                ssp.removeAllUserTask(UserHandle.myUserId());
             }
         }, mConfig.taskViewRemoveAnimDuration);
     }
@@ -882,8 +919,12 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
         }
     }
 
-    /** Final callback after Recents is finally hidden. */
+    /** Final callback after Recentis finally hidden. */
     void onRecentsHidden() {
+    	if(null!=mPopup){
+    		mPopup.dismiss();
+    	}
+    	
         reset();
     }
 
@@ -945,7 +986,6 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
             TaskView frontTv = getChildViewForTask(newFrontMostTask);
             if (frontTv != null) {
                 frontTv.onTaskBound(newFrontMostTask);
-                frontTv.fadeInActionButton(0, mConfig.taskViewEnterFromAppDuration);
             }
         }
 
@@ -969,28 +1009,22 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
         /*
         // Stash the scroll and filtered task for us to restore to when we unfilter
         mStashedScroll = getStackScroll();
-
         // Calculate the current task transforms
         ArrayList<TaskViewTransform> curTaskTransforms =
                 getStackTransforms(curTasks, getStackScroll(), null, true);
-
         // Update the task offsets
         mLayoutAlgorithm.updateTaskOffsets(mStack.getTasks());
-
         // Scroll the item to the top of the stack (sans-peek) rect so that we can see it better
         updateMinMaxScroll(false);
         float overlapHeight = mLayoutAlgorithm.getTaskOverlapHeight();
         setStackScrollRaw((int) (newStack.indexOfTask(filteredTask) * overlapHeight));
         boundScrollRaw();
-
         // Compute the transforms of the items in the new stack after setting the new scroll
         final ArrayList<Task> tasks = mStack.getTasks();
         final ArrayList<TaskViewTransform> taskTransforms =
                 getStackTransforms(mStack.getTasks(), getStackScroll(), null, true);
-
         // Animate
         mFilterAlgorithm.startFilteringAnimation(curTasks, curTaskTransforms, tasks, taskTransforms);
-
         // Notify any callbacks
         mCb.onTaskStackFilterTriggered();
         */
@@ -1002,26 +1036,20 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
         // Calculate the current task transforms
         final ArrayList<TaskViewTransform> curTaskTransforms =
                 getStackTransforms(curTasks, getStackScroll(), null, true);
-
         // Update the task offsets
         mLayoutAlgorithm.updateTaskOffsets(mStack.getTasks());
-
         // Restore the stashed scroll
         updateMinMaxScroll(false);
         setStackScrollRaw(mStashedScroll);
         boundScrollRaw();
-
         // Compute the transforms of the items in the new stack after restoring the stashed scroll
         final ArrayList<Task> tasks = mStack.getTasks();
         final ArrayList<TaskViewTransform> taskTransforms =
                 getStackTransforms(tasks, getStackScroll(), null, true);
-
         // Animate
         mFilterAlgorithm.startFilteringAnimation(curTasks, curTaskTransforms, tasks, taskTransforms);
-
         // Clear the saved vars
         mStashedScroll = 0;
-
         // Notify any callbacks
         mCb.onTaskStackUnfilterTriggered();
         */
@@ -1134,6 +1162,13 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
     }
 
     @Override
+    public void onTaskFloatClicked(TaskView tv) {
+        if (mCb != null) {
+            mCb.onTaskFloatClicked(tv.getTask());
+        }
+    }
+
+    @Override
     public void onTaskViewLongClicked(final TaskView tv) {
         final PopupMenu popup = new PopupMenu(getContext(), tv.mHeaderView.mApplicationIcon);
         mPopup = popup;
@@ -1167,6 +1202,9 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
                         break;
                     case R.id.recent_inspect_item:
                         onTaskViewAppInfoClicked(tv);
+                        break;
+                    case R.id.recent_float_mode:
+                        onTaskFloatClicked(tv);
                         break;
                     case R.id.recent_force_stop:
                     {
@@ -1300,4 +1338,26 @@ public class TaskStackView extends FrameLayout implements TaskStack.TaskStackCal
             }
         }
     }
+    
+
+        private void refreshWhiteList() {
+            final String dndString = Settings.System.getString(mContext.getContentResolver(),
+                    Settings.System.RECENTS_WHITE_VALUES);
+            
+            if (whiteList != null) {
+            	whiteList.clear();
+    			if (dndString != null) {
+    				final String[] array = TextUtils.split(dndString,  "\\|");
+    				for (String item : array) {
+    					whiteList.add(item.trim());
+    				}
+    			}
+    		}
+        }
+    
+    private boolean isPackageExcluded(String packageName) {
+    	Log.d(TAG, whiteList.toArray().toString());
+        return whiteList.contains(packageName);
+    }
+    
 }

@@ -4069,6 +4069,12 @@ public class Intent implements Parcelable, Cloneable {
      */
     public static final int FLAG_RECEIVER_NO_ABORT = 0x08000000;
     /**
+     * If set, this intent will always match start up as a floating window
+     * in multi window scenarios.
+     * @hide
+     */
+    public static final int FLAG_FLOATING_WINDOW = 0X80000000;
+    /**
      * If set, when sending a broadcast <i>before boot has completed</i> only
      * registered receivers will be called -- no BroadcastReceiver components
      * will be launched.  Sticky intent state will be recorded properly even
