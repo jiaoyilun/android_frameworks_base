@@ -16,9 +16,15 @@
 
 package com.android.systemui.statusbar;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.TimeInterpolator;
+import android.annotation.ChaosLab;
+import android.annotation.ChaosLab.Classification;
 import android.app.ActivityManager;
 import android.app.ActivityManagerNative;
 import android.app.Notification;
@@ -28,9 +34,9 @@ import android.app.TaskStackBuilder;
 import android.app.admin.DevicePolicyManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
-import android.content.Context;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
@@ -42,6 +48,7 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.content.res.ThemeConfig;
 import android.database.ContentObserver;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.media.session.MediaController;
@@ -68,6 +75,7 @@ import android.util.Slog;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import android.view.Display;
+import android.view.Gravity;
 import android.view.IWindowManager;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -90,30 +98,25 @@ import android.widget.TextView;
 import com.android.internal.statusbar.IStatusBarService;
 import com.android.internal.statusbar.StatusBarIcon;
 import com.android.internal.statusbar.StatusBarIconList;
+import com.android.internal.util.NotificationColorUtil;
 import com.android.internal.util.cm.SpamFilter;
 import com.android.internal.util.cm.SpamFilter.SpamContract.NotificationTable;
 import com.android.internal.util.cm.SpamFilter.SpamContract.PackageTable;
-import com.android.internal.util.NotificationColorUtil;
 import com.android.internal.widget.LockPatternUtils;
+import com.android.keyguard.KeyguardHostView.OnDismissAction;
 import com.android.systemui.R;
 import com.android.systemui.RecentsComponent;
 import com.android.systemui.SearchPanelView;
 import com.android.systemui.SwipeHelper;
 import com.android.systemui.SystemUI;
+import com.android.systemui.chaos.lab.gestureanywhere.GestureAnywhereView;
 import com.android.systemui.cm.SpamMessageProvider;
-import com.android.systemui.statusbar.NotificationData.Entry;
 import com.android.systemui.statusbar.NotificationData.Entry;
 import com.android.systemui.statusbar.phone.NavigationBarView;
 import com.android.systemui.statusbar.phone.StatusBarKeyguardViewManager;
 import com.android.systemui.statusbar.policy.HeadsUpNotificationView;
 import com.android.systemui.statusbar.policy.PreviewInflater;
 import com.android.systemui.statusbar.stack.NotificationStackScrollLayout;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-
-import static com.android.keyguard.KeyguardHostView.OnDismissAction;
 
 public abstract class BaseStatusBar extends SystemUI implements
         CommandQueue.Callbacks, ActivatableNotificationView.OnActivatedListener,
@@ -263,6 +266,9 @@ public abstract class BaseStatusBar extends SystemUI implements
     protected NotificationOverflowContainer mKeyguardIconOverflowContainer;
     protected DismissView mDismissView;
     protected EmptyShadeView mEmptyShadeView;
+    
+    @ChaosLab(name="GestureAnywhere", classification=Classification.NEW_FIELD)
+    protected GestureAnywhereView mGestureAnywhereView;
 
     @Override  // NotificationData.Environment
     public boolean isDeviceProvisioned() {
@@ -2378,4 +2384,38 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
         return mStatusBarKeyguardViewManager.isSecure();
     }
+    
+    @ChaosLab(name="GestureAnywhere", classification=Classification.NEW_METHOD)
+    protected void addGestureAnywhereView() {
+        mGestureAnywhereView = (GestureAnywhereView)View.inflate(
+                mContext, R.layout.gesture_anywhere_overlay, null);
+        mWindowManager.addView(mGestureAnywhereView, getGestureAnywhereViewLayoutParams(Gravity.LEFT));
+        mGestureAnywhereView.setStatusBar(this);
+    }
+
+    @ChaosLab(name="GestureAnywhere", classification=Classification.NEW_METHOD)
+    protected void removeGestureAnywhereView() {
+        if (mGestureAnywhereView != null)
+            mWindowManager.removeView(mGestureAnywhereView);
+    }
+
+    @ChaosLab(name="GestureAnywhere", classification=Classification.NEW_METHOD)
+    protected WindowManager.LayoutParams getGestureAnywhereViewLayoutParams(int gravity) {
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_STATUS_BAR_SUB_PANEL,
+                0
+                | WindowManager.LayoutParams.FLAG_TOUCHABLE_WHEN_WAKING
+                | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                | WindowManager.LayoutParams.FLAG_SPLIT_TOUCH,
+                PixelFormat.TRANSLUCENT);
+        lp.privateFlags |= WindowManager.LayoutParams.PRIVATE_FLAG_NO_MOVE_ANIMATION;
+        lp.gravity = Gravity.TOP | gravity;
+        lp.setTitle("GestureAnywhereView");
+        return lp;
+    }
+    
 }

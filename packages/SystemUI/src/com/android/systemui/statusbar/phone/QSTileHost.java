@@ -48,6 +48,7 @@ import com.android.systemui.qs.tiles.CustomQSTile;
 import com.android.systemui.qs.tiles.DataTile;
 import com.android.systemui.qs.tiles.DdsTile;
 import com.android.systemui.qs.tiles.FlashlightTile;
+import com.android.systemui.qs.tiles.GestureTile;
 import com.android.systemui.qs.tiles.HeadsUpTile;
 import com.android.systemui.qs.tiles.HotspotTile;
 import com.android.systemui.qs.tiles.LiveDisplayTile;
@@ -381,6 +382,8 @@ public class QSTileHost implements QSTile.Host {
                 return new HeadsUpTile(this);
             case QSConstants.TILE_AMBIENT_DISPLAY:
                 return new AmbientDisplayTile(this);
+            case QSConstants.TILE_GESTURE:
+                return new GestureTile(this);    
             case QSConstants.TILE_SYNC:
                 return new SyncTile(this);
             case QSConstants.TILE_BATTERY_SAVER:

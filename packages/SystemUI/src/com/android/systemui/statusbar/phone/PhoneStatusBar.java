@@ -1000,6 +1000,10 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         }
 
         updateShowSearchHoldoff();
+        
+        if (!mRecreating) {
+            addGestureAnywhereView();
+        }
 
         try {
             boolean showNav = mWindowManagerService.hasNavigationBar();

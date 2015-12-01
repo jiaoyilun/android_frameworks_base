@@ -178,4 +178,7 @@
     <string name="quick_settings_expanded_hide_both">Hide both</string>
     <string name="accessibility_quick_settings_expanded_desktop_off">Expanded desktop disabled</string>
     <string name="recents_memory_free">Free RAM:</string>
+    
+    <!-- Gesture -->
+    <string name="gesture_unknown">Gesture is not found!</string>
 </resources>

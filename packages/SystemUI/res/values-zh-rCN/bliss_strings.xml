@@ -86,4 +86,7 @@
     
     <string name="recents_memory_free">剩余内存：</string>
     <string name="recent_float_mode_title">浮动模式</string>
+    
+     <!-- Gesture -->
+    <string name="gesture_unknown">囧，无法识别，再试试吧</string>
 </resources>
