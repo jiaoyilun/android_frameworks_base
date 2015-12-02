@@ -22,11 +22,12 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-import android.os.SystemProperties;
 
 public class ProximitySensorManager {
-
-    public interface ProximitySensorListener {
+	
+	private static final String TAG = "ProximitySensorManager";
+    
+	public interface ProximitySensorListener {
         public void onPickup();
     }
 
@@ -139,11 +140,10 @@ public class ProximitySensorManager {
     public ProximitySensorManager(Context context, ProximitySensorListener listener) {
         SensorManager sensorManager =
                 (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-        String trueVersion = SystemProperties.get("ro.modversion");
         Sensor proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         Sensor acceleroMeter = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         Sensor magneticSensor = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        if (proximitySensor == null && acceleroMeter == null && magneticSensor == null || !trueVersion.startsWith("SM")) {
+        if (proximitySensor == null && acceleroMeter == null && magneticSensor == null) {
             mProximitySensorListener = null;
         } else {
             mProximitySensorListener =

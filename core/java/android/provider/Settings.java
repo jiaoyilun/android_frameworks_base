@@ -4214,7 +4214,11 @@ public final class Settings {
         @ChaosLab(name="GestureAnywhere", classification=Classification.NEW_FIELD)
         public static final String GESTURE_ANYWHERE_SHOW_TRIGGER = "gesture_anywhere_show_trigger";
 
-        /*************Gesture end****************/
+        /**  Three Finger Gesture
+        *
+        * @hide
+        */
+       public static final String THREE_FINGER_GESTURE = "three_finger_gesture";
         
         /**
          * Put on your ear, and this will automatically call current number in dialer
@@ -4227,6 +4231,7 @@ public final class Settings {
          * @hide
          */
         public static final String DIRECT_CALL_FOR_MMS = "direct_call_for_mms";
+        /*************Gesture end****************/
     }
 
     /**
